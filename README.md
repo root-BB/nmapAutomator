@@ -1,3 +1,13 @@
+## Additions
+
+I edit this script, which I liked very much, according to my usage style;
+
+- New scanning type added; **Graded** : It runs Port, Script, Vulns scans. After that runs Full, Vulns, Recons scans (If a new port is not found as a result of the Full scan, Vulns scan will be scripted).
+- Ffuf now only lists pages with 200 and 405 error codes.
+- Ffuf now scans the txt format anyway.
+- The wordlist used in ffuf and gobuster was replaced with directory-list-2.3-medium.txt instead of common.txt
+- Ffuf and gobuster automatically start the recommended scan without waiting for user input.
+
 # nmapAutomator
 
 A script you can run in the background!
