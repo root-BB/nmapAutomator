@@ -1,5 +1,6 @@
 #!/bin/sh
 #by @21y4d
+#edited by BaHTsIzBEdEvi
 
 # Define ANSI color variables
 RED='\033[0;31m'
@@ -116,6 +117,7 @@ usage() {
         printf "${YELLOW}\tVulns   : ${NC}Runs CVE scan and nmap Vulns scan on all found ports ${YELLOW}(~5-15 minutes)\n"
         printf "${YELLOW}\tRecon   : ${NC}Suggests recon commands, then prompts to automatically run them\n"
         printf "${YELLOW}\tAll     : ${NC}Runs all the scans ${YELLOW}(~20-30 minutes)\n"
+		printf "${YELLOW}\tGraded  : ${NC}Runs Port, Script, Vulns scans. After that runs Full, Vulns, Recons scans\n(If a new port is not found as a result of the Full scan, Vulns scan will be scripted)${YELLOW}(~20-30 minutes)\n"
         printf "${NC}\n"
         exit 1
 }
@@ -392,7 +394,6 @@ fullScan() {
                         if [ -z "${extraPorts}" ]; then
                                 echo
                                 echo
-                                allPorts=""
                                 printf "${YELLOW}No new ports\n"
                                 printf "${NC}\n"
                         else
@@ -501,6 +502,50 @@ vulnsScan() {
         echo
 }
 
+vulns2Scan() {
+        printf "${GREEN}---------------------Starting Vulns Scan for All Ports-----------------------\n"
+        printf "${NC}\n"
+
+        if ! $REMOTE; then
+                # Set ports to be scanned (common or all)
+                if [ -z "${extraPorts}" ]; then
+                	echo
+                	echo
+                        printf "${YELLOW}No new ports\n"
+			printf "${YELLOW}Skipping Vulns Scan...\n"
+			printf "${NC}\n"
+                else
+                        portType="all"
+                        ports="${extraPorts}"
+			# Ensure the vulners script is available, then run it with nmap
+			if [ ! -f /usr/share/nmap/scripts/vulners.nse ]; then
+				printf "${RED}Please install 'vulners.nse' nmap script:\n"
+				printf "${RED}https://github.com/vulnersCom/nmap-vulners\n"
+				printf "${RED}\n"
+				printf "${RED}Skipping CVE scan!\n"
+				printf "${NC}\n"
+			else
+				printf "${YELLOW}Running CVE scan on ${ports} ports\n"
+				printf "${NC}\n"
+				nmapProgressBar "${nmapType} -sV --script vulners --script-args mincvss=7.0 -p${ports} --open -oN nmap/CVEs_${HOST}.nmap ${HOST} ${DNSSTRING}" 3
+				echo
+			fi
+				# Nmap vulnerability detection script scan
+				echo
+				printf "${YELLOW}Running Vuln scan on ${ports} ports\n"
+				printf "${YELLOW}This may take a while, depending on the number of detected services..\n"
+				printf "${NC}\n"
+				nmapProgressBar "${nmapType} -sV --script vuln -p${ports} --open -oN nmap/Vulns_${HOST}.nmap ${HOST} ${DNSSTRING}" 3
+                fi			
+        else
+                printf "${YELLOW}Vulns Scan is not supported in Remote mode.\n${NC}"
+        fi
+
+        echo
+        echo
+        echo
+}
+
 # Run reconRecommend(), ask user for tools to run, then run runRecon()
 recon() {
         IFS="
@@ -535,33 +580,8 @@ recon() {
         # Ask user for which recon tools to run, default to All if no answer is detected in 30s
         if [ -n "${availableRecon}" ]; then
                 while [ "${reconCommand}" != "!" ]; do
-                        printf "${YELLOW}\n"
-                        printf "Which commands would you like to run?${NC}\nAll (Default), ${availableRecon}, Skip <!>\n\n"
-                        while [ ${count} -lt ${secs} ]; do
-                                tlimit=$((secs - count))
-                                printf "\033[2K\rRunning Default in (${tlimit})s: "
-
-                                # Waits 1 second for user's input - POSIX read -t
-                                reconCommand="$(sh -c '{ { sleep 1; kill -sINT $$; } & }; exec head -n 1')"
-                                count=$((count + 1))
-                                [ -n "${reconCommand}" ] && break
-                        done
-                        if expr "${reconCommand}" : '^\([Aa]ll\)$' >/dev/null || [ -z "${reconCommand}" ]; then
                                 runRecon "${HOST}" "All"
                                 reconCommand="!"
-                        elif expr " ${availableRecon}," : ".* ${reconCommand}," >/dev/null; then
-                                runRecon "${HOST}" "${reconCommand}"
-                                reconCommand="!"
-                        elif [ "${reconCommand}" = "Skip" ] || [ "${reconCommand}" = "!" ]; then
-                                reconCommand="!"
-                                echo
-                                echo
-                                echo
-                        else
-                                printf "${NC}\n"
-                                printf "${RED}Incorrect choice!\n"
-                                printf "${NC}\n"
-                        fi
                 done
         else
                 printf "${YELLOW}No Recon Recommendations found...\n"
@@ -630,10 +650,10 @@ reconRecommend() {
                                 fi
                                 if type ffuf >/dev/null 2>&1; then
                                         extensions="$(echo 'index' >./index && ffuf -s -w ./index:FUZZ -mc '200,302' -e '.asp,.aspx,.html,.jsp,.php' -u "${urlType}${HOST}:${port}/FUZZ" 2>/dev/null | awk -vORS=, -F 'index' '{print $2}' | sed 's/.$//' && rm ./index)"
-                                        echo "ffuf -ic -w /usr/share/wordlists/dirb/common.txt -e '${extensions}' -u \"${urlType}${HOST}:${port}/FUZZ\" | tee \"recon/ffuf_${HOST}_${port}.txt\""
+                                        echo "ffuf -mc '200,405' -ic -w /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt -e '${extensions},.txt' -u \"${urlType}${HOST}:${port}/FUZZ\" | tee \"recon/ffuf_${HOST}_${port}.txt\""
                                 else
                                         extensions="$(echo 'index' >./index && gobuster dir -w ./index -t 30 -qnkx '.asp,.aspx,.html,.jsp,.php' -s '200,302' -u "${urlType}${HOST}:${port}" 2>/dev/null | awk -vORS=, -F 'index' '{print $2}' | sed 's/.$//' && rm ./index)"
-                                        echo "gobuster dir -w /usr/share/wordlists/dirb/common.txt -t 30 -ekx '${extensions}' -u \"${urlType}${HOST}:${port}\" -o \"recon/gobuster_${HOST}_${port}.txt\""
+                                        echo "gobuster dir -w /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt -t 30 -elkx '${extensions},.txt' -u \"${urlType}${HOST}:${port}\" -o \"recon/gobuster_${HOST}_${port}.txt\""
                                 fi
                                 echo
                         fi
@@ -818,6 +838,14 @@ main() {
                 vulnsScan "${HOST}"
                 recon "${HOST}"
                 ;;
+		[Gg]raded)
+				portScan "${HOST}"
+                scriptScan "${HOST}"
+				vulnsScan "${HOST}"
+				fullScan "${HOST}"
+				vulns2Scan "${HOST}"
+				recon "${HOST}"
+				;;
         esac
 
         footer
@@ -836,7 +864,7 @@ if ! expr "${HOST}" : '^\([0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}
 fi
 
 # Ensure selected scan type is among available choices, then run the selected scan
-if ! case "${TYPE}" in [Nn]etwork | [Pp]ort | [Ss]cript | [Ff]ull | UDP | udp | [Vv]ulns | [Rr]econ | [Aa]ll) false ;; esac then
+if ! case "${TYPE}" in [Nn]etwork | [Pp]ort | [Ss]cript | [Ff]ull | UDP | udp | [Vv]ulns | [Rr]econ | [Aa]ll | [Gg]raded) false ;; esac then
         mkdir -p "${OUTPUTDIR}" && cd "${OUTPUTDIR}" && mkdir -p nmap/ || usage
         main | tee "nmapAutomator_${HOST}_${TYPE}.txt"
 else
